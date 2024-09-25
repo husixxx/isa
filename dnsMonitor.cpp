@@ -27,6 +27,10 @@ void dnsMonitor::startSniffing(helper::Config &config)
     {
         this->verbose = true;
     }
+    else
+    {
+        this->verbose = false;
+    }
 
     struct bpf_program fp;
     if (pcap_compile(handle, &fp, filter.c_str(), 0, PCAP_NETMASK_UNKNOWN) == -1)
@@ -59,7 +63,14 @@ void dnsMonitor::printPacket(u_char *args, const struct pcap_pkthdr *header, con
 
     string timestamp = string(buffer);
 
-    cout << "Timestamp: " << timestamp << endl;
+    if (monitor->verbose)
+    {
+        cout << "Timestamp: " << timestamp << endl;
+    }
+    else
+    {
+        cout << timestamp << " ";
+    }
     struct ether_header *eth = (struct ether_header *)packet;
 
     switch (ntohs(eth->ether_type))
@@ -86,9 +97,9 @@ void dnsMonitor::printIpv4(const u_char *packet)
     }
     else
     {
-        cout << inet_ntoa(ipheader->ip_src) << " -> " << inet_ntoa(ipheader->ip_dst) << endl;
+        cout << inet_ntoa(ipheader->ip_src) << " -> " << inet_ntoa(ipheader->ip_dst);
+        this->printIp4Ports(packet + ipheader->ip_hl * 4);
     }
-
 }
 
 void dnsMonitor::printIpv6(const u_char *packet)
@@ -105,7 +116,8 @@ void dnsMonitor::printIpv6(const u_char *packet)
     }
     else
     {
-        cout << inet_ntop(AF_INET6, &(ip6header->ip6_src), ip6_addr, INET6_ADDRSTRLEN) << " -> " << inet_ntop(AF_INET6, &(ip6header->ip6_dst), ip6_addr, INET6_ADDRSTRLEN) << endl;
+        cout << inet_ntop(AF_INET6, &(ip6header->ip6_src), ip6_addr, INET6_ADDRSTRLEN) << " -> " << inet_ntop(AF_INET6, &(ip6header->ip6_dst), ip6_addr, INET6_ADDRSTRLEN);
+        this->printIp6Ports(packet + sizeof(struct ip6_hdr));
     }
 }
 
@@ -128,7 +140,11 @@ void dnsMonitor::printDetails(const u_char *packet)
 
     int offset = 2;
     uint16_t id = ntohs(*(uint16_t *)packet);
-    cout << "Identifier: 0x" << hex << setw(4) << setfill('0') << id << dec << endl;
+    if (this->verbose)
+    {
+
+        cout << "Identifier: 0x" << hex << setw(4) << setfill('0') << id << dec << endl;
+    }
 
     uint16_t flags = ntohs(*(uint16_t *)(packet + offset));
     offset += 2;
@@ -143,16 +159,19 @@ void dnsMonitor::printDetails(const u_char *packet)
     uint8_t cd = (flags & 0x0010) >> 4;
     uint8_t rcode = (flags & 0x000F);
 
-    cout << "Flags: "
-         << "QR=" << static_cast<int>(qr) << ", "
-         << "OPCODE=" << static_cast<int>(opcode) << ", "
-         << "AA=" << static_cast<int>(aa) << ", "
-         << "TC=" << static_cast<int>(tc) << ", "
-         << "RD=" << static_cast<int>(rd) << ", "
-         << "RA=" << static_cast<int>(ra) << ", "
-         << "AD=" << static_cast<int>(ad) << ", "
-         << "CD=" << static_cast<int>(cd) << ", "
-         << "RCODE=" << static_cast<int>(rcode) << endl;
+    if (this->verbose)
+    {
+        cout << "Flags: "
+             << "QR=" << static_cast<int>(qr) << ", "
+             << "OPCODE=" << static_cast<int>(opcode) << ", "
+             << "AA=" << static_cast<int>(aa) << ", "
+             << "TC=" << static_cast<int>(tc) << ", "
+             << "RD=" << static_cast<int>(rd) << ", "
+             << "RA=" << static_cast<int>(ra) << ", "
+             << "AD=" << static_cast<int>(ad) << ", "
+             << "CD=" << static_cast<int>(cd) << ", "
+             << "RCODE=" << static_cast<int>(rcode) << endl;
+    }
 
     // uint16_t qdcount = ntohs(*(uint16_t *)(packet + 4));
     // cout << "DNS QDCOUNT (Number of Questions): " << qdcount << endl;
@@ -166,20 +185,29 @@ void dnsMonitor::printDetails(const u_char *packet)
     int numberOfAdditional = static_cast<int>(ntohs(*(uint16_t *)(packet + offset)));
     offset += 2;
 
-    this->printQuestionSection(packet, offset, numberOfQuestions);
-    this->printAnswerSection(packet, offset, numberOfAnswers);
-    if(numberOfAuthority != 0) this->printAuthoritySection(packet, offset, numberOfAuthority);
-    if(numberOfAdditional != 0) this->printAdditionalSection(packet, offset, numberOfAdditional);
-    
+    string qrBit = qr == 1 ? "R" : "Q";
 
-    cout << "====================" << endl;   
+    if(!this->verbose){
+        cout << "(" << qrBit << " " << numberOfQuestions << "/" << numberOfAnswers << "/" << numberOfAuthority << "/" << numberOfAdditional << ")" << endl;
+        return;
+    }
+
+    this->printQuestionSection(packet, offset, numberOfQuestions);
+    if(numberOfAnswers != 0)
+        this->printAnswerSection(packet, offset, numberOfAnswers);
+    if (numberOfAuthority != 0)
+        this->printAuthoritySection(packet, offset, numberOfAuthority);
+    if (numberOfAdditional != 0)
+        this->printAdditionalSection(packet, offset, numberOfAdditional);
+
+    cout << "====================" << endl;
 }
 
 pair<string, int> dnsMonitor::printDomainName(const u_char *packet, int offset)
 {
     string domainName = "";
     int length = packet[offset];
-    int originalOffset = offset; 
+    int originalOffset = offset;
     while (length != 0)
     {
         // compression
@@ -189,8 +217,8 @@ pair<string, int> dnsMonitor::printDomainName(const u_char *packet, int offset)
             int pointer = ((length & 0x3F) << 8) + packet[offset + 1];
             // call to decode at the pointing location
             domainName += printDomainName(packet, pointer).first;
-            offset += 2; // move 
-            
+            offset += 2; // move
+
             return {domainName, offset};
         }
         for (int i = 0; i < length; i++)
@@ -252,7 +280,6 @@ void dnsMonitor::printQuestionSection(const u_char *packet, int &offset, int cou
     }
 }
 
-
 void dnsMonitor::printAdditionalSection(const u_char *packet, int &offset, int count)
 {
     cout << "[Additional Section]" << endl;
@@ -262,8 +289,6 @@ void dnsMonitor::printAdditionalSection(const u_char *packet, int &offset, int c
         count--;
     }
 }
-
-
 
 int dnsMonitor::printRecord(const u_char *packet, int offset)
 {
@@ -290,7 +315,6 @@ int dnsMonitor::printRecord(const u_char *packet, int offset)
     return offset;
 }
 
-
 void dnsMonitor::printIp4Ports(const u_char *packet)
 {
 
@@ -299,8 +323,11 @@ void dnsMonitor::printIp4Ports(const u_char *packet)
     int srcPort = ntohs(udpheader->source);
     int dstPort = ntohs(udpheader->dest);
 
-    cout << "UDP/" << srcPort << endl;
-    cout << "UDP/" << dstPort << endl;
+    if (this->verbose)
+    {
+        cout << "UDP/" << srcPort << endl;
+        cout << "UDP/" << dstPort << endl;
+    }
 
     this->printDetails(packet + sizeof(ether_header) + sizeof(struct udphdr));
 }
@@ -312,82 +339,80 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
 
     switch (type)
     {
-        case 1: // A record (IPv4 address)
-        {
-            // IPv4 adresa je vždy 4 bajty, prevedieme ju na čitateľný formát
-            char ipv4[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, packet + offset, ipv4, INET_ADDRSTRLEN);
-            rdata = ipv4;
-            offset += 4;
-            break;
-        }
-        case 28: // AAAA record (IPv6 address)
-        {
-            // IPv6 adresa je vždy 16 bajtov, prevedieme ju na čitateľný formát
-            char ipv6[INET6_ADDRSTRLEN];
-            inet_ntop(AF_INET6, packet + offset, ipv6, INET6_ADDRSTRLEN);
-            rdata = ipv6;
-            offset += 16;
-            break;
-        }
-        case 5: // CNAME record
-        {
-            // CNAME obsahuje doménové meno (môže byť komprimované)
-            auto result = printDomainName(packet, offset);
-            rdata = result.first;
-            offset = result.second;
-            break;
-        }
-        case 15: // MX record
-        {
-            // MX obsahuje 2 bajty pre prioritu a potom doménové meno
-            int preference = (packet[offset] << 8) | packet[offset + 1];
-            auto result = printDomainName(packet, offset + 2); // Doménové meno začína po 2 bajtoch
-            rdata = "Preference: " + std::to_string(preference) + ", Mail Exchanger: " + result.first;
-            offset = result.second;
-            break;
-        }
-        case 2: // NS record
-        {
-            // NS obsahuje doménové meno (môže byť komprimované)
-            auto result = printDomainName(packet, offset);
-            rdata = result.first;
-            offset = result.second;
-            break;
-        }
-        case 12: // PTR record (Pointer record)
-        {
-            // PTR obsahuje doménové meno (môže byť komprimované)
-            auto result = printDomainName(packet, offset);
-            rdata = result.first;
-            break;
-        }
-        case 6: // SOA record (Start of Authority)
-        {
-            // SOA obsahuje viacero polí: Primary NS, Admin MB, Serial, Refresh, Retry, Expire, Minimum TTL
-            auto primaryNs = printDomainName(packet, offset);         // Primárny name server
-            auto adminMb = printDomainName(packet, primaryNs.second); // Email administrátora
+    case 1: // A record (IPv4 address)
+    {
+        // IPv4 adresa je vždy 4 bajty, prevedieme ju na čitateľný formát
+        char ipv4[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, packet + offset, ipv4, INET_ADDRSTRLEN);
+        rdata = ipv4;
+        offset += 4;
+        break;
+    }
+    case 28: // AAAA record (IPv6 address)
+    {
+        // IPv6 adresa je vždy 16 bajtov, prevedieme ju na čitateľný formát
+        char ipv6[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, packet + offset, ipv6, INET6_ADDRSTRLEN);
+        rdata = ipv6;
+        offset += 16;
+        break;
+    }
+    case 5: // CNAME record
+    {
+        // CNAME obsahuje doménové meno (môže byť komprimované)
+        auto result = printDomainName(packet, offset);
+        rdata = result.first;
+        offset = result.second;
+        break;
+    }
+    case 15: // MX record
+    {
+        // MX obsahuje 2 bajty pre prioritu a potom doménové meno
+        int preference = (packet[offset] << 8) | packet[offset + 1];
+        auto result = printDomainName(packet, offset + 2); // Doménové meno začína po 2 bajtoch
+        rdata = "Preference: " + std::to_string(preference) + ", Mail Exchanger: " + result.first;
+        offset = result.second;
+        break;
+    }
+    case 2: // NS record
+    {
+        // NS obsahuje doménové meno (môže byť komprimované)
+        auto result = printDomainName(packet, offset);
+        rdata = result.first;
+        offset = result.second;
+        break;
+    }
+    case 12: // PTR record (Pointer record)
+    {
+        // PTR obsahuje doménové meno (môže byť komprimované)
+        auto result = printDomainName(packet, offset);
+        rdata = result.first;
+        break;
+    }
+    case 6: // SOA record (Start of Authority)
+    {
+        // SOA obsahuje viacero polí: Primary NS, Admin MB, Serial, Refresh, Retry, Expire, Minimum TTL
+        auto primaryNs = printDomainName(packet, offset);         // Primárny name server
+        auto adminMb = printDomainName(packet, primaryNs.second); // Email administrátora
 
-            // Následné polia sú celé čísla (4 bajty každé)
-            int serial = ntohl(*(int *)(packet + adminMb.second));
-            int refresh = ntohl(*(int *)(packet + adminMb.second + 4));
-            int retry = ntohl(*(int *)(packet + adminMb.second + 8));
-            int expire = ntohl(*(int *)(packet + adminMb.second + 12));
-            int minimum = ntohl(*(int *)(packet + adminMb.second + 16));
+        // Následné polia sú celé čísla (4 bajty každé)
+        int serial = ntohl(*(int *)(packet + adminMb.second));
+        int refresh = ntohl(*(int *)(packet + adminMb.second + 4));
+        int retry = ntohl(*(int *)(packet + adminMb.second + 8));
+        int expire = ntohl(*(int *)(packet + adminMb.second + 12));
+        int minimum = ntohl(*(int *)(packet + adminMb.second + 16));
 
-            rdata = "Primary NS: " + primaryNs.first + ", Admin MB: " + adminMb.first + ", Serial: " + std::to_string(serial) + ", Refresh: " + std::to_string(refresh) + ", Retry: " + std::to_string(retry) + ", Expire: " + std::to_string(expire) + ", Minimum TTL: " + std::to_string(minimum);
-            offset = adminMb.second + 20;
-            break;
-        }
-        default:
-            rdata = "Unknown type";
-            break;
+        rdata = "Primary NS: " + primaryNs.first + ", Admin MB: " + adminMb.first + ", Serial: " + std::to_string(serial) + ", Refresh: " + std::to_string(refresh) + ", Retry: " + std::to_string(retry) + ", Expire: " + std::to_string(expire) + ", Minimum TTL: " + std::to_string(minimum);
+        offset = adminMb.second + 20;
+        break;
+    }
+    default:
+        rdata = "Unknown type";
+        break;
     }
 
     return rdata;
 }
-
-
 
 string dnsMonitor::getRecordType(uint16_t type)
 {
