@@ -3,6 +3,7 @@
 #include "helper.hpp"
 #include <arpa/inet.h>
 #include <iomanip>
+#include <utility>
 #include <sstream>
 #include <ctime>
 #include <netinet/in.h>
@@ -41,15 +42,21 @@ class dnsMonitor
     };
 
     string getRecordType(uint16_t type);
-    string getRecordClass(uint16_t type);
-    void startSniffing(helper::Config &config);
+    string getRecordClass(uint16_t type);       
+    void startSniffing(helper::Config &config);                
     void startPcapFile(helper::Config &config);
     void printIpv4(const u_char *packet);
     void printIpv6(const u_char *packet);
-    void printPorts(const u_char *packet);
+    void printIp4Ports(const u_char *packet);
     void printDetails(const u_char *packet);
-    string printDomainName(const u_char *packet, int offset);
-
+    pair<string, int> printDomainName(const u_char *packet, int offset);
+    void printAnswerSection(const u_char *packet, int& offset, int count);
+    void printQuestionSection(const u_char *packet, int& offset, int count);
+    void printAuthoritySection(const u_char *packet, int& offset, int count);
+    void printAdditionalSection(const u_char *packet, int& offset, int count);
+    int printRecord(const u_char *packet, int offset);
+    void printIp6Ports(const u_char *packet);
+    string printRdata(const u_char *packet, int &offset, int type, int length);
     static void printPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
     private:
     char errbuf[PCAP_ERRBUF_SIZE];
