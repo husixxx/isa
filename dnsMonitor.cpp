@@ -1,10 +1,21 @@
 #include "dnsMonitor.hpp"
+using namespace std;
 
 void dnsMonitor::startSniffing(helper::Config &config)
 {
     pcap_t *handle = nullptr;
 
-    std::string interface = config.interface;
+    if (config.domainsFile != "")
+    {
+        this->file = fopen(config.domainsFile.c_str(), "w");
+        domainCheck = true;
+    }
+    else
+    {
+        domainCheck = false;
+    }
+
+    string interface = config.interface;
     if (config.interface != "")
     {
 
@@ -48,6 +59,7 @@ void dnsMonitor::startSniffing(helper::Config &config)
     pcap_freecode(&fp); // free
 
     pcap_loop(handle, 0, printPacket, reinterpret_cast<u_char *>(this));
+    // fclose(file);
 }
 
 void dnsMonitor::printPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
@@ -129,8 +141,12 @@ void dnsMonitor::printIp6Ports(const u_char *packet)
     int srcPort = ntohs(udpheader->source);
     int dstPort = ntohs(udpheader->dest);
 
-    cout << "UDP/" << srcPort << endl;
-    cout << "UDP/" << dstPort << endl;
+    if (verbose)
+    {
+
+        cout << "UDP/" << dstPort << endl;
+        cout << "UDP/" << srcPort << endl;
+    }
 
     this->printDetails(packet + sizeof(ether_header) + sizeof(struct udphdr));
 }
@@ -187,13 +203,14 @@ void dnsMonitor::printDetails(const u_char *packet)
 
     string qrBit = qr == 1 ? "R" : "Q";
 
-    if(!this->verbose){
+    if (!this->verbose && !domainCheck)
+    {
         cout << "(" << qrBit << " " << numberOfQuestions << "/" << numberOfAnswers << "/" << numberOfAuthority << "/" << numberOfAdditional << ")" << endl;
         return;
     }
 
     this->printQuestionSection(packet, offset, numberOfQuestions);
-    if(numberOfAnswers != 0)
+    if (numberOfAnswers != 0)
         this->printAnswerSection(packet, offset, numberOfAnswers);
     if (numberOfAuthority != 0)
         this->printAuthoritySection(packet, offset, numberOfAuthority);
@@ -218,6 +235,15 @@ pair<string, int> dnsMonitor::printDomainName(const u_char *packet, int offset)
             // call to decode at the pointing location
             domainName += printDomainName(packet, pointer).first;
             offset += 2; // move
+            // if (domainCheck)
+            // {
+
+            //     if (find(domains.begin(), domains.end(), domainName) == domains.end())
+            //     {
+            //         domains.push_back(domainName);
+            //         fprintf(file, "%s\n", domainName.c_str());
+            //     }
+            // }
 
             return {domainName, offset};
         }
@@ -236,13 +262,21 @@ pair<string, int> dnsMonitor::printDomainName(const u_char *packet, int offset)
     {
         domainName.pop_back();
     }
+
     // move
+    // if (this->domains.find(domainName) == this->domains.end())
+    // {
+    //     this->domains.insert(domainName);
+    //     cout << "KKT";
+    // fprintf(file, "%s\n", domainName.c_str());
+    // }
     return {domainName, offset + 1};
 }
 
 void dnsMonitor::printAuthoritySection(const u_char *packet, int &offset, int count)
 {
-    cout << "[Authority Section]" << endl;
+    if (verbose)
+        cout << "[Authority Section]" << endl;
 
     while (count > 0)
     {
@@ -253,7 +287,8 @@ void dnsMonitor::printAuthoritySection(const u_char *packet, int &offset, int co
 
 void dnsMonitor::printAnswerSection(const u_char *packet, int &offset, int count)
 {
-    cout << "[Answer Section]" << endl;
+    if (verbose)
+        cout << "[Answer Section]" << endl;
     while (count > 0)
     {
         offset = this->printRecord(packet, offset);
@@ -263,10 +298,14 @@ void dnsMonitor::printAnswerSection(const u_char *packet, int &offset, int count
 
 void dnsMonitor::printQuestionSection(const u_char *packet, int &offset, int count)
 {
-    cout << "[Question Section]" << endl;
+    if (verbose)
+    {
+        cout << "[Question Section]" << endl;
+    }
     while (count > 0)
     {
         auto domain = printDomainName(packet, offset);
+        loadDomains(domain.first);
         string domainName = domain.first;
         offset = domain.second;
         uint16_t type = ntohs(*(uint16_t *)(packet + offset));
@@ -275,14 +314,31 @@ void dnsMonitor::printQuestionSection(const u_char *packet, int &offset, int cou
         uint16_t classType = ntohs(*(uint16_t *)(packet + offset));
         offset += 2;
         string recordClass = this->getRecordClass(classType);
-        cout << domainName << " " << recordClass << " " << recordType << endl;
+        if (verbose)
+            cout << domainName << " " << recordClass << " " << recordType << endl;
         count--;
     }
 }
 
+
+void dnsMonitor::loadDomains(string domainName)
+{
+    if (domainCheck)
+    {
+        if (find(domains.begin(), domains.end(), domainName) == domains.end())
+        {
+            domains.push_back(domainName);
+            fprintf(file, "%s\n", domainName.c_str());
+            fflush(file);
+        }
+    }
+}
+
+
 void dnsMonitor::printAdditionalSection(const u_char *packet, int &offset, int count)
 {
-    cout << "[Additional Section]" << endl;
+    if (verbose)
+        cout << "[Additional Section]" << endl;
     while (count > 0)
     {
         offset = this->printRecord(packet, offset);
@@ -294,6 +350,7 @@ int dnsMonitor::printRecord(const u_char *packet, int offset)
 {
     // Name 2 bytes
     auto domain = this->printDomainName(packet, offset);
+    loadDomains(domain.first);
     string additionalDomainName = domain.first;
     offset = domain.second;
     // Type 2 bytes
@@ -311,7 +368,10 @@ int dnsMonitor::printRecord(const u_char *packet, int offset)
     // 10 bytes
     offset += 10;
     string rdata = printRdata(packet, offset, additionalType, dataLength);
-    cout << additionalDomainName << " " << ttl << " " << additionalRecordClass << " " << additionalRecordType << " " << rdata << endl;
+    if (verbose)
+    {
+        cout << additionalDomainName << " " << ttl << " " << additionalRecordClass << " " << additionalRecordType << " " << rdata << endl;
+    }
     return offset;
 }
 
@@ -361,6 +421,7 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
     {
         // CNAME obsahuje doménové meno (môže byť komprimované)
         auto result = printDomainName(packet, offset);
+        loadDomains(result.first);
         rdata = result.first;
         offset = result.second;
         break;
@@ -370,6 +431,7 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
         // MX obsahuje 2 bajty pre prioritu a potom doménové meno
         int preference = (packet[offset] << 8) | packet[offset + 1];
         auto result = printDomainName(packet, offset + 2); // Doménové meno začína po 2 bajtoch
+        loadDomains(result.first);
         rdata = "Preference: " + std::to_string(preference) + ", Mail Exchanger: " + result.first;
         offset = result.second;
         break;
@@ -379,6 +441,7 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
         // NS obsahuje doménové meno (môže byť komprimované)
         auto result = printDomainName(packet, offset);
         rdata = result.first;
+        loadDomains(rdata);
         offset = result.second;
         break;
     }
@@ -387,13 +450,16 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
         // PTR obsahuje doménové meno (môže byť komprimované)
         auto result = printDomainName(packet, offset);
         rdata = result.first;
+        loadDomains(rdata);
         break;
     }
     case 6: // SOA record (Start of Authority)
     {
         // SOA obsahuje viacero polí: Primary NS, Admin MB, Serial, Refresh, Retry, Expire, Minimum TTL
         auto primaryNs = printDomainName(packet, offset);         // Primárny name server
+        loadDomains(primaryNs.first);
         auto adminMb = printDomainName(packet, primaryNs.second); // Email administrátora
+        loadDomains(adminMb.first);
 
         // Následné polia sú celé čísla (4 bajty každé)
         int serial = ntohl(*(int *)(packet + adminMb.second));

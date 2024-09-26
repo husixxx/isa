@@ -4,8 +4,11 @@
 #include <arpa/inet.h>
 #include <iomanip>
 #include <utility>
+#include <set>
+#include <cstdio>  // Pre FILE*, fopen, fclose
 #include <sstream>
 #include <ctime>
+
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ether.h>
@@ -16,10 +19,14 @@
 #include <netinet/icmp6.h>
 #include <pcap.h>
 #include <vector>
+#include <algorithm>
 #include <unordered_map>
 using namespace std;
 class dnsMonitor
 {
+
+    
+
     public:
 
 
@@ -41,6 +48,8 @@ class dnsMonitor
         
     };
 
+
+
     string getRecordType(uint16_t type);
     string getRecordClass(uint16_t type);       
     void startSniffing(helper::Config &config);                
@@ -58,9 +67,13 @@ class dnsMonitor
     void printIp6Ports(const u_char *packet);
     string printRdata(const u_char *packet, int &offset, int type, int length);
     static void printPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
+    vector<string> domains;
+    void loadDomains(string domainName);
     private:
     char errbuf[PCAP_ERRBUF_SIZE];
     bool verbose;
+    bool domainCheck;
+    FILE* file;
 };
 
 
