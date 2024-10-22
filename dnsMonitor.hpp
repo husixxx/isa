@@ -63,7 +63,8 @@ class dnsMonitor
     void printQuestionSection(const u_char *packet, int& offset, int count);
     void printAuthoritySection(const u_char *packet, int& offset, int count);
     void printAdditionalSection(const u_char *packet, int& offset, int count);
-    int printRecord(const u_char *packet, int offset);
+    // 1 = answer section, 2 = authority section, 3 = additional section
+    int printRecord(const u_char *packet, int offset, int type);
     void printIp6Ports(const u_char *packet);
     string printRdata(const u_char *packet, int &offset, int type, int length);
     static void printPacket(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
