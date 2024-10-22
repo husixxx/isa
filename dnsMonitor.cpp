@@ -263,7 +263,7 @@ pair<string, int> dnsMonitor::printDomainName(const u_char *packet, int offset)
         domainName.pop_back();
     }
 
-    // move
+    // mov
     // if (this->domains.find(domainName) == this->domains.end())
     // {
     //     this->domains.insert(domainName);
@@ -275,33 +275,27 @@ pair<string, int> dnsMonitor::printDomainName(const u_char *packet, int offset)
 
 void dnsMonitor::printAuthoritySection(const u_char *packet, int &offset, int count)
 {
-    if (verbose)
-        cout << "[Authority Section]" << endl;
-
     while (count > 0)
     {
-        offset = this->printRecord(packet, offset);
+        // 2 for authority section
+        offset = this->printRecord(packet, offset, 2);
         count--;
     }
 }
 
 void dnsMonitor::printAnswerSection(const u_char *packet, int &offset, int count)
 {
-    if (verbose)
-        cout << "[Answer Section]" << endl;
+    
     while (count > 0)
     {
-        offset = this->printRecord(packet, offset);
+        offset = this->printRecord(packet, offset, 1);
         count--;
     }
 }
 
 void dnsMonitor::printQuestionSection(const u_char *packet, int &offset, int count)
 {
-    if (verbose)
-    {
-        cout << "[Question Section]" << endl;
-    }
+    
     while (count > 0)
     {
         auto domain = printDomainName(packet, offset);
@@ -314,8 +308,16 @@ void dnsMonitor::printQuestionSection(const u_char *packet, int &offset, int cou
         uint16_t classType = ntohs(*(uint16_t *)(packet + offset));
         offset += 2;
         string recordClass = this->getRecordClass(classType);
-        if (verbose)
+        if(recordType == "Unknown" || recordClass == "Unknown")
+        {
+            count--;
+            continue;
+        }
+        if (verbose){
+            cout << endl << "[Question Section]" << endl;
             cout << domainName << " " << recordClass << " " << recordType << endl;
+        }
+    
         count--;
     }
 }
@@ -337,16 +339,16 @@ void dnsMonitor::loadDomains(string domainName)
 
 void dnsMonitor::printAdditionalSection(const u_char *packet, int &offset, int count)
 {
-    if (verbose)
-        cout << "[Additional Section]" << endl;
+    
     while (count > 0)
     {
-        offset = this->printRecord(packet, offset);
+        // 3 for additional section
+        offset = this->printRecord(packet, offset, 3);
         count--;
     }
 }
 
-int dnsMonitor::printRecord(const u_char *packet, int offset)
+int dnsMonitor::printRecord(const u_char *packet, int offset, int type)
 {
     // Name 2 bytes
     auto domain = this->printDomainName(packet, offset);
@@ -368,8 +370,18 @@ int dnsMonitor::printRecord(const u_char *packet, int offset)
     // 10 bytes
     offset += 10;
     string rdata = printRdata(packet, offset, additionalType, dataLength);
+    if(additionalRecordType == "Unknown" || additionalRecordClass == "Unknown" || rdata == "Unknown type"){
+            return offset;
+        }
     if (verbose)
     {
+        if(type == 2){
+            cout << endl << "[Authority Section]" << endl;
+        }else if(type == 3){
+            cout << endl << "[Additional Section]" << endl;
+        }else if(type == 1){
+            cout << endl << "[Answer Section]" << endl;
+        }
         cout << additionalDomainName << " " << ttl << " " << additionalRecordClass << " " << additionalRecordType << " " << rdata << endl;
     }
     return offset;
@@ -445,14 +457,6 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
         offset = result.second;
         break;
     }
-    case 12: // PTR record (Pointer record)
-    {
-        // PTR obsahuje doménové meno (môže byť komprimované)
-        auto result = printDomainName(packet, offset);
-        rdata = result.first;
-        loadDomains(rdata);
-        break;
-    }
     case 6: // SOA record (Start of Authority)
     {
         // SOA obsahuje viacero polí: Primary NS, Admin MB, Serial, Refresh, Retry, Expire, Minimum TTL
@@ -474,6 +478,7 @@ string dnsMonitor::printRdata(const u_char *packet, int &offset, int type, int l
     }
     default:
         rdata = "Unknown type";
+        offset += length;
         break;
     }
 
